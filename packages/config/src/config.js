@@ -112,19 +112,83 @@ function resetConfig(oldConfig) {
 }
 
 /**
+ * @typedef {Object} FlowJSONv2 - Flow.json schema 'v2'
+ * @property {Object} contracts
+ * @property {Object} networks
+ * @property {Object} accounts
+ *
+ * @example <caption>Flow.json v2 </caption>
+ * {
+ * 	"contracts": {
+ * 		"HelloWorld": "alice"
+ * 	  "MultiSourceContract": {
+ * 	    "emulator": "./contracts/MultiSourceContract.cdc",
+ * 	    "testnet": "bob"
+ * 	  }
+ * 	},
+ * 	"networks": {
+ * 		"emulator": "127.0.0.1:3569",
+ * 	},
+ * 	"accounts": {
+ * 		"alice": {
+ * 			"emulator": "0x1",
+ * 		  "testnet": "0x0004"
+ * 		},
+ * 	  "bob": {
+ * 	    "testnet": "0x005"
+ * 	  }
+ * 	}
+ * }
+ *
+ */
+
+/**
+ * @typedef {Object} FlowJSONv1 - Flow.json schema 'v1'
+ * @property {Object} accounts
+ * @property {Object} contracts
+ * @property {Object} deployments
+ * @property {Object} networks
+ *
+ * @example <caption>Flow.json v1 </caption>
+ * {
+ * 	"contracts": {
+ * 		"HelloWorld": {
+ * 			"source": "./cadence/contracts/HelloWorld.cdc",
+ * 			"aliases": {
+ * 				"emulator": "0xf8d6e0586b0a20c7"
+ * 			}
+ * 		}
+ * 	},
+ * 	"networks": {
+ * 		"emulator": "127.0.0.1:3569",
+ * 	},
+ * 	"accounts": {
+ * 		"emulator-account": {
+ * 			"fromFile": "./emulator.private.json"
+ * 		}
+ * 	},
+ * 	"deployments": {
+ * 		"emulator": {
+ * 			"emulator-account": [
+ * 				"HelloWorld"
+ * 			]
+ * 		}
+ * 	}
+ * }
+ *
+ */
+
+/**
  * Takes in flow.json or array of flow.json files and creates contract placeholders
- * @param {Object|Object[]} data
+ * @param {FlowJSONv1|FlowJSONv1[]|FlowJSONv2|FlowJSONv2[]} data.flowJSON
  * @returns {void}
  */
 async function load(data) {
   const network = await get("flow.network")
   const cleanedNetwork = cleanNetwork(network)
-  const { flowJSON } = data
+  const {flowJSON} = data
 
-  invariant(
-    Boolean(flowJSON),
-    "config.load -- 'flowJSON' must be defined"
-  )
+  invariant(Boolean(flowJSON), "config.load -- 'flowJSON' must be defined")
 
   invariant(
     cleanedNetwork,
@@ -132,7 +196,7 @@ async function load(data) {
   )
 
   if (anyHasPrivateKeys(flowJSON)) {
-    const isEmulator = cleanedNetwork === 'emulator'
+    const isEmulator = cleanedNetwork === "emulator"
 
     logger.log({
       title: "Private Keys Detected",
@@ -143,14 +207,16 @@ async function load(data) {
     if (!isEmulator) return
   }
 
-  for (const [key, value] of Object.entries(getContracts(flowJSON, cleanedNetwork))) {
-    const contractConfigKey = `0x${key}`
+  for (const [key, value] of Object.entries(
+    getContracts(flowJSON, cleanedNetwork)
+  )) {
+    const contractConfigKey = `${key}`
     const existingContractConfigKey = await get(contractConfigKey)
 
-    if (existingContractConfigKey) {
+    if (existingContractConfigKey && existingContractConfigKey === value) {
       logger.log({
         title: "Contract Placeholder Conflict Detected",
-        message: `A generated contract placeholder from config.load and a placeholder you've set manually in config have the same name.`,
+        message: `A generated contract placeholder from config.load conflicts with  a placeholder you've set manually in config have the same name.`,
         level: logger.LEVELS.warn,
       })
     } else {

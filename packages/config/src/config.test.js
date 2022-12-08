@@ -1,5 +1,13 @@
 import {config, clearConfig} from "./config"
 
+/**
+ * @typedef {import('./config').FlowJSONv1} FlowJSONv1
+ */
+
+/**
+ * @typedef {import('./config').FlowJSONv2} FlowJSONv2
+ */
+
 const idle = () => new Promise(resolve => setTimeout(resolve), 0)
 
 describe("config()", () => {
@@ -7,7 +15,7 @@ describe("config()", () => {
     clearConfig()
   })
 
-  describe("crud methods", async () => {
+  describe("crud methods", () => {
     beforeEach(async () => {
       config({
         "config.test.init": "rawr",
@@ -153,5 +161,215 @@ describe("config()", () => {
         expect(await config.first(from, FALLBACK)).toBe(want)
       })
     }
+  })
+
+  describe("load method", () => {
+    describe("with a set network", () => {
+      beforeEach(async () => {
+        // Just picked a random network. Behavior might differ based on network selection at a future date.
+        await config().put("flow.network", "emulator")
+      })
+
+      describe("flow.json v1", () => {
+        /**
+         * @type {FlowJSONv1}
+         */
+        let flowJSON
+
+        beforeEach(async () => {
+          flowJSON = {
+            accounts: {
+              "emulator-account": {
+                fromFile: "./emulator.private.json",
+              },
+            },
+            contracts: {
+              HelloWorld: {
+                source: "./cadence/contracts/HelloWorld.cdc",
+                aliases: {
+                  emulator: "0x1",
+                  testnet: "0x01",
+                  mainnet: "0x001",
+                },
+              },
+              SecondLife: {
+                aliases: {
+                  testnet: "0x02",
+                  mainnet: "0x002",
+                },
+              },
+            },
+            deployments: {
+              emulator: {
+                "emulator-account": ["HelloWorld"],
+              },
+            },
+            networks: {
+              emulator: "127.0.0.1:3569",
+            },
+          }
+        })
+
+        describe("with single config loaded", () => {
+          beforeEach(async () => {
+            await config().load({flowJSON})
+            await idle()
+          })
+
+          test("should load the contract location wrt the currently set network", async () => {
+            await expect(config().get("0xHelloWorld")).resolves.toBe("0x1")
+          })
+
+          test("should not set a contract if it does not have an alias", async () => {
+            await expect(config().get("0xSecondLife")).resolves.toBeUndefined()
+          })
+        })
+
+        describe("with an array of configs loaded", () => {
+          beforeEach(async () => {
+            /**
+             * @type {FlowJSONv1}
+             */
+            let secondFlowJSON = {
+              accounts: {},
+              contracts: {
+                ThirdContract: {
+                  aliases: {
+                    emulator: "0x3",
+                    testnet: "0x03",
+                    mainnet: "0x003",
+                  },
+                },
+              },
+              deployments: {},
+              networks: {},
+            }
+
+            await config().load({flowJSON: [flowJSON, secondFlowJSON]})
+            await idle()
+          })
+
+          test("should load the contract locations from the secondFlowJSON", async () => {
+            await expect(config().get("0xThirdContract")).resolves.toBe("0x3")
+          })
+        })
+      })
+
+      describe("flow.json v2", () => {
+        /**
+         * @type {FlowJSONv2}
+         */
+        let flowJSON
+
+        describe("contracts with an account alias", () => {
+          beforeEach(async () => {
+            flowJSON = {
+              contracts: {
+                HelloWorld: "alice",
+              },
+              networks: {
+                emulator: "127.0.0.1:3569",
+              },
+              accounts: {
+                alice: {
+                  emulator: "0x1",
+                  testnet: "0x01",
+                },
+                bob: {
+                  emulator: "0x2",
+                  testnet: "0x02",
+                },
+              },
+            }
+
+            await config().load({flowJSON})
+            await idle()
+          })
+
+          test("should load the contract location wrt the currently set network", async () => {
+            await expect(config().get("contracts.HelloWorld")).resolves.toBe(
+              "0x1"
+            )
+          })
+        })
+
+        describe("contract with multiple sources", () => {
+          beforeEach(async () => {
+            flowJSON = {
+              contracts: {
+                MultiSourceContract: {
+                  emulator: "./contracts/MultiSourceContract.cdc",
+                  testnet: "bob",
+                },
+              },
+              networks: {
+                emulator: "127.0.0.1:3569",
+              },
+              accounts: {
+                alice: {
+                  emulator: "0x1",
+                  testnet: "0x01",
+                },
+                bob: {
+                  emulator: "0x2",
+                  testnet: "0x02",
+                },
+              },
+            }
+
+            await config().load({flowJSON})
+            await idle()
+          })
+
+          test("should load the contract location wrt the currently set network", async () => {
+            await expect(
+              config().get("contracts.MultiSourceContract")
+            ).resolves.toBe("./contracts/MultiSourceContract.cdc")
+          })
+        })
+
+        describe("multiple contracts", () => {
+          beforeEach(async () => {
+            flowJSON = {
+              contracts: {
+                FirstContract: {
+                  emulator: "alice",
+                },
+                SecondContract: {
+                  emulator: "bob",
+                },
+              },
+              networks: {
+                emulator: "127.0.0.1:3569",
+              },
+              accounts: {
+                alice: {
+                  emulator: "0x1",
+                },
+                bob: {
+                  emulator: "0x2",
+                },
+              },
+            }
+
+            await config().load({flowJSON})
+            await idle()
+          })
+
+          test("should load the contract locations wrt the currently set network", async () => {
+            await expect(config().where(/^contracts./)).resolves.toEqual({
+              "contracts.FirstContract": "0x1",
+              "contracts.SecondContract": "0x2",
+            })
+          })
+        })
+      })
+    })
+  })
+
+  describe("without a network set", () => {
+    test("should throw an error", async () => {
+      await expect(() => config().load({flowJSON: {}})).rejects.toThrowError()
+    })
   })
 })
